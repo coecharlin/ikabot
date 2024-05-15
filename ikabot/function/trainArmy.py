@@ -7,6 +7,7 @@ import gettext
 import json
 import re
 import traceback
+import threading
 
 from ikabot.config import *
 from ikabot.helpers.botComm import *
@@ -18,6 +19,7 @@ from ikabot.helpers.resources import getAvailableResources
 from ikabot.helpers.signals import setInfoSignal
 from ikabot.helpers.varios import *
 from ikabot.helpers.varios import addThousandSeparator
+from ikabot.function.stationArmy import getArmyAvailable, sendArmy
 
 t = gettext.translation("trainArmy", localedir, languages=languages, fallback=True)
 _ = t.gettext
@@ -48,6 +50,82 @@ def getBuildingInfo(session, city, trainTroops):
     data = session.post(params=params)
     return json.loads(data, strict=False)
 
+def getBuildingTownHall(session, city):
+    """
+    Parameters
+    ----------
+    session : ikabot.web.session.Session
+    city : dict
+    trainTroops : bool
+
+    Returns
+    -------
+    response : dict
+    """
+    params = {
+        "view": "townHall",
+        "cityId": city["id"],
+        "position": 0,
+        "backgroundView": "city",
+        "currentCityId": city["id"],
+        "actionRequest": actionRequest,
+        "ajax": "1",
+    }
+    data = session.post(params=params)
+    return json.loads(data, strict=False)
+def getBuildingInfoTownHall(data):
+    json_text = json.dumps(data[2][1])
+
+    patterns = [
+        r'"js_TownHallMaxInhabitants": {"text": (\d+)}', 
+        r'"js_TownHallPopulationGraphCitizenCount": {"text": "(\d+)"}', 
+        r'"js_TownHallPopulationGrowthValue": {"text": "(\d+)\s', 
+        r'"js_TownHallPopulationGrowthValue": {"text": "(\d+\.\d+)', 
+        r'"js_TownHallPopulationGraphResourceWorkerCount": {"text": "(\d+)"}',
+        r'"js_TownHallPopulationGraphSpecialWorkerCount": {"text": "(\d+)"}',
+        r'"js_TownHallPopulationGraphScientistCount": {"text": "(\d+)"}',
+        r'"js_TownHallPopulationGraphPriestCount": {"text": "(\d+)"}',
+        r'"js_TownHallOccupiedSpace": {"text": (\d+)}' 
+    ]
+
+    results = {}
+    workingPopulation = 0
+
+    for pattern in patterns:
+        match = re.search(pattern, json_text)
+        if match:
+            value = match.group(1)
+            try:
+                int_value = int(float(value))
+                if "js_TownHallPopulationGraphResourceWorkerCount" in pattern:
+                    workingPopulation += int_value
+                elif "js_TownHallPopulationGraphSpecialWorkerCount" in pattern:
+                    workingPopulation += int_value
+                elif "js_TownHallPopulationGraphScientistCount" in pattern:
+                    workingPopulation += int_value
+                elif "js_TownHallPopulationGraphPriestCount" in pattern:
+                    workingPopulation += int_value
+                results[pattern.split('"')[1]] = int_value
+            except ValueError:
+                results[pattern.split('"')[1]] = None
+    results["workingPopulation"] = workingPopulation
+    return results
+
+def waitForInhabitants(session, city, populationNeed):
+    data = getBuildingTownHall(session, city)
+    townHallInfo = getBuildingInfoTownHall(data)
+    maxInhabitants = townHallInfo.get("js_TownHallMaxInhabitants")
+    growthValue = townHallInfo.get("js_TownHallPopulationGrowthValue")
+    occupiedSpace = townHallInfo.get("js_TownHallOccupiedSpace")
+    workingPopulation = townHallInfo.get("workingPopulation")
+    maxIdlePopulation = maxInhabitants - workingPopulation 
+    currentIdlePopulation = maxIdlePopulation - occupiedSpace
+    populationToGrow = maxIdlePopulation - currentIdlePopulation 
+    
+    if populationToGrow != 0 and growthValue and growthValue > 1:
+        timeToWait = populationNeed / growthValue
+        waitTimeSeconds = timeToWait * 3600
+        wait(waitTimeSeconds + 10)
 
 def train(session, city, trainings, trainTroops):
     """
@@ -108,7 +186,9 @@ def planTrainings(session, city, trainings, trainTroops):
     while True:
 
         # total number of units to create
-        total = sum([unit["cantidad"] for training in trainings for unit in training])
+        total = sum(unit["cantidad"] for training in trainings for unit in training)
+        countTotal = sum(unit["cantidad"] for training in trainings for unit in training)
+
         if total == 0:
             return
 
@@ -157,6 +237,10 @@ def planTrainings(session, city, trainings, trainTroops):
 
             # amount of units that will be trained
             total = sum([unit["train"] for unit in training])
+            if total != countTotal:
+                populationNeed = countTotal - total
+                waitForInhabitants(session, city, populationNeed)
+                total = countTotal
             if total == 0:
                 msg = _(
                     "It was not possible to finish the training due to lack of resources."
@@ -180,7 +264,6 @@ def generateArmyData(units_info):
     i = 1
     units = []
     while "js_barracksSlider{:d}".format(i) in units_info:
-        # {'identifier':'phalanx','unit_type_id':303,'costs':{'citizens':1,'wood':27,'sulfur':30,'upkeep':3,'completiontime':71.169695412658},'local_name':'Hoplita'}
         info = units_info["js_barracksSlider{:d}".format(i)]["slider"]["control_data"]
         info = json.loads(info, strict=False)
         units.append(info)
@@ -412,13 +495,7 @@ def trainArmy(session, event, stdin_fd, predetermined_input):
             rta = read(values=["y", "Y", "n", "N", ""])
             if rta.lower() == "n":
                 event.set()
-                return
-
-        if trainTroops:
-            print(_("\nThe selected troops will be trained."))
-        else:
-            print(_("\nThe selected fleet will be trained."))
-        enter()
+                return     
 
         if replicate == "y":
             countRepeat = countRepeat + 1
@@ -432,15 +509,14 @@ def trainArmy(session, event, stdin_fd, predetermined_input):
                         for i in range(len(city["position"])):
                             if city["position"][i]["building"] == lookfor:
                                 city["pos"] = str(i)
+                                
                                 tranings_copy = []
                                 units_copy = copy.deepcopy(units)
                                 tranings_copy.append(units_copy)
-                                loop = asyncio.get_event_loop()
-                                loop.run_until_complete(
-                                    planTrainings(
-                                        session, city, tranings_copy, trainTroops
-                                    )
-                                )
+                                
+                                thread = threading.Thread(target=planTrainings, args=(session, city, tranings_copy, trainTroops))
+                                thread.start()
+                                # planTrainings(session, city, tranings_copy, trainTroops)
                                 break
                     except Exception as e:
                         if trainTroops:
@@ -458,20 +534,35 @@ def trainArmy(session, event, stdin_fd, predetermined_input):
                 countRepeat = countRepeat - 1
 
         else:
-            if trainTroops:
-                info = _("\nI train troops in {}\n").format(city["cityName"])
-            else:
-                info = _("\nI train fleets in {}\n").format(city["cityName"])
-            setInfoSignal(session, info)
-            try:
-                planTrainings(session, city, tranings, trainTroops)
-            except Exception as e:
-                msg = _("Error in:\n{}\nCause:\n{}").format(
-                    info, traceback.format_exc()
-                )
-                sendToBot(session, msg)
-            finally:
-                session.logout()
+            countRepeat = countRepeat + 1
+            while countRepeat > 0:
+                if trainTroops:
+                    info = _("\nI train troops in {}\n").format(city["cityName"])
+                else:
+                    info = _("\nI train fleets in {}\n").format(city["cityName"])
+                setInfoSignal(session, info)
+                try:
+                    tranings_copy = []
+                    units_copy = copy.deepcopy(units)
+                    tranings_copy.append(units_copy)
+                    
+                    thread = threading.Thread(target=planTrainings, args=(session, city, tranings_copy, trainTroops))
+                    thread.start()
+                    sendToBot(session, "PAssou 1x"+ str(countRepeat))
+                    # planTrainings(session, city, tranings, trainTroops)
+                except Exception as e:
+                    msg = _("Error in:\n{}\nCause:\n{}").format(
+                        info, traceback.format_exc()
+                    )
+                    sendToBot(session, msg)
+                countRepeat = countRepeat -1
+                # finally:
+                #     session.logout()
+        if trainTroops:
+            print(_("\nThe selected troops will be trained."))
+        else:
+            print(_("\nThe selected fleet will be trained."))
+        enter()
     except KeyboardInterrupt:
         event.set()
         return
