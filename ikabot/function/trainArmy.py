@@ -495,7 +495,28 @@ def trainArmy(session, event, stdin_fd, predetermined_input):
             rta = read(values=["y", "Y", "n", "N", ""])
             if rta.lower() == "n":
                 event.set()
-                return     
+                return
+
+        print(_("\nDeseja transportar as unidades apos treinamento ?")) 
+        rta = read(values=["y", "Y", "n", "N", ""])
+        if rta.lower() == "n":
+            event.set()
+            return 
+        destination_city = chooseCity(session)
+        type_army = True
+        
+        # Continuar aqui...................
+        for cityId in cityTrainings:
+            if cityId != destination_city["id"]:
+                army_available = getArmyAvailable(
+                    session, type_army, destination_city["id"], cityId, event)
+                if army_available != None:
+                    sendArmy(
+                        session,cityId,destination_city, type_army,army_available,
+                    )
+                    print("Army sent!")
+                    enter()
+                    event.set()
 
         if replicate == "y":
             countRepeat = countRepeat + 1
@@ -509,11 +530,11 @@ def trainArmy(session, event, stdin_fd, predetermined_input):
                         for i in range(len(city["position"])):
                             if city["position"][i]["building"] == lookfor:
                                 city["pos"] = str(i)
-                                
+
                                 tranings_copy = []
                                 units_copy = copy.deepcopy(units)
                                 tranings_copy.append(units_copy)
-                                
+
                                 thread = threading.Thread(target=planTrainings, args=(session, city, tranings_copy, trainTroops))
                                 thread.start()
                                 # planTrainings(session, city, tranings_copy, trainTroops)
@@ -545,7 +566,7 @@ def trainArmy(session, event, stdin_fd, predetermined_input):
                     tranings_copy = []
                     units_copy = copy.deepcopy(units)
                     tranings_copy.append(units_copy)
-                    
+
                     thread = threading.Thread(target=planTrainings, args=(session, city, tranings_copy, trainTroops))
                     thread.start()
                     sendToBot(session, "PAssou 1x"+ str(countRepeat))
