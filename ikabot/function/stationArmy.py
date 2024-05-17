@@ -109,10 +109,11 @@ def getArmyAvailable(session, type_army, destination_city_id, origin_city_id, ev
                 weight_total_army += int(quantity) * int(weight_results[i])
 
         if type_army and weight_total_army > weight_total_ships:
-            banner()
+            # banner()
             print("Not enough ships to transport all the units!")
-            enter()
-            return None
+            # enter()
+            event.set()
+            return 
         return army_available
     return None
 

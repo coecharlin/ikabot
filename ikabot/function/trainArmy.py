@@ -189,8 +189,8 @@ def planTrainings(session, city, trainings, trainTroops):
         total = sum(unit["cantidad"] for training in trainings for unit in training)
         countTotal = sum(unit["cantidad"] for training in trainings for unit in training)
 
-        if total == 0:
-            return
+        # if total == 0:
+        #     return
 
         for training in trainings:
             waitForTraining(session, city, trainTroops)
@@ -225,13 +225,11 @@ def planTrainings(session, city, trainings, trainTroops):
                     material_name = materials_names_english[i].lower()
                     if material_name in unit["costs"]:
                         resourcesAvailable[i] -= (
-                            unit["costs"][material_name] * unit["train"]
-                        )
+                            unit["costs"][material_name] * unit["train"])
 
                 if "citizens" in unit["costs"]:
                     resourcesAvailable[len(materials_names_english)] -= (
-                        unit["costs"]["citizens"] * unit["train"]
-                    )
+                        unit["costs"]["citizens"] * unit["train"])
 
                 unit["cantidad"] -= unit["train"]
 
@@ -241,12 +239,12 @@ def planTrainings(session, city, trainings, trainTroops):
                 populationNeed = countTotal - total
                 waitForInhabitants(session, city, populationNeed)
                 total = countTotal
-            if total == 0:
-                msg = _(
-                    "It was not possible to finish the training due to lack of resources."
-                )
-                sendToBot(session, msg)
-                return
+            # if total == 0:
+            #     msg = _(
+            #         "It was not possible to finish the training due to lack of resources."
+            #     )
+            #     sendToBot(session, msg)
+            #     return
 
             train(session, city, training, trainTroops)
 
@@ -341,43 +339,28 @@ def trainArmy(session, event, stdin_fd, predetermined_input):
 
                 if "citizens" in unit["costs"]:
                     cost[len(materials_names_english) + 0] += (
-                        unit["costs"]["citizens"] * unit["cantidad"]
-                    )
+                        unit["costs"]["citizens"] * unit["cantidad"])
                 if "upkeep" in unit["costs"]:
                     cost[len(materials_names_english) + 1] += (
-                        unit["costs"]["upkeep"] * unit["cantidad"]
-                    )
+                        unit["costs"]["upkeep"] * unit["cantidad"])
                 if "completiontime" in unit["costs"]:
                     cost[len(materials_names_english) + 2] += (
-                        unit["costs"]["completiontime"] * unit["cantidad"]
-                    )
+                        unit["costs"]["completiontime"] * unit["cantidad"])
 
             print(_("\nTotal cost:"))
             for i in range(len(materials_names_english)):
                 if cost[i] > 0:
-                    print(
-                        "{}: {}".format(
-                            materials_names_english[i], addThousandSeparator(cost[i])
-                        )
-                    )
+                    print("{}: {}".format(
+                            materials_names_english[i], addThousandSeparator(cost[i])))
             if cost[len(materials_names_english) + 0] > 0:
-                print(
-                    _("Citizens: {}").format(
-                        addThousandSeparator(cost[len(materials_names_english) + 0])
-                    )
-                )
+                print(_("Citizens: {}").format(
+                        addThousandSeparator(cost[len(materials_names_english) + 0])))
             if cost[len(materials_names_english) + 1] > 0:
-                print(
-                    _("Maintenance: {}").format(
-                        addThousandSeparator(cost[len(materials_names_english) + 1])
-                    )
-                )
+                print(_("Maintenance: {}").format(
+                        addThousandSeparator(cost[len(materials_names_english) + 1])))
             if cost[len(materials_names_english) + 2] > 0:
-                print(
-                    _("Duration: {}").format(
-                        daysHoursMinutes(int(cost[len(materials_names_english) + 2]))
-                    )
-                )
+                print(_("Duration: {}").format(
+                        daysHoursMinutes(int(cost[len(materials_names_english) + 2]))))
 
             print(_("\nProceed? [Y/n]"))
             rta = read(values=["y", "Y", "n", "N", ""])
@@ -449,6 +432,8 @@ def trainArmy(session, event, stdin_fd, predetermined_input):
                 ids, cities = getIdsOfCities(session)
                 for cityId in ids:
                     cityTrainings.append(cityId)
+        else:
+            cityTrainings = None
 
         # calculate if the city has enough resources
         resourcesAvailable = city["availableResources"].copy()
@@ -497,26 +482,42 @@ def trainArmy(session, event, stdin_fd, predetermined_input):
                 event.set()
                 return
 
-        print(_("\nDeseja transportar as unidades apos treinamento ?")) 
+        print(_("\nDeseja transportar as unidades apos treinamento ? [y/N]"))
         rta = read(values=["y", "Y", "n", "N", ""])
-        if rta.lower() == "n":
-            event.set()
-            return 
-        destination_city = chooseCity(session)
-        type_army = True
-        
-        # Continuar aqui...................
-        for cityId in cityTrainings:
-            if cityId != destination_city["id"]:
-                army_available = getArmyAvailable(
-                    session, type_army, destination_city["id"], cityId, event)
-                if army_available != None:
-                    sendArmy(
-                        session,cityId,destination_city, type_army,army_available,
+        if rta.lower() == "y":
+            destination_city = chooseCity(session)
+            type_army = True
+
+            # Continuar aqui...................
+            if cityTrainings:
+                for cityId in cityTrainings:
+                    ids, cities = getIdsOfCities(session)
+                    for city_id in cities:
+                        city = cities[city_id]
+                        if cityId != int(destination_city["id"]) and city["id"] == int(city_id):
+                            army_available = getArmyAvailable(
+                                session, type_army, destination_city["id"],
+                                cityId, event,
+                            )
+                            if army_available != None:
+                                sendArmy(
+                                    session, city, destination_city,
+                                    type_army,army_available,
+                                )
+                                event.set()
+            else:
+                if city["id"] != int(destination_city["id"]):
+                    army_available = getArmyAvailable(
+                        session,
+                        type_army,
+                        destination_city["id"],
+                        city["id"],
+                        event,
                     )
-                    print("Army sent!")
-                    enter()
-                    event.set()
+                    if army_available != None:
+                        sendArmy(session, city, destination_city,
+                            type_army, army_available, )
+                        event.set()
 
         if replicate == "y":
             countRepeat = countRepeat + 1
@@ -537,7 +538,6 @@ def trainArmy(session, event, stdin_fd, predetermined_input):
 
                                 thread = threading.Thread(target=planTrainings, args=(session, city, tranings_copy, trainTroops))
                                 thread.start()
-                                # planTrainings(session, city, tranings_copy, trainTroops)
                                 break
                     except Exception as e:
                         if trainTroops:
@@ -558,9 +558,9 @@ def trainArmy(session, event, stdin_fd, predetermined_input):
             countRepeat = countRepeat + 1
             while countRepeat > 0:
                 if trainTroops:
-                    info = _("\nI train troops in {}\n").format(city["cityName"])
+                    info = _("\nI train troops in {}\n").format(city["name"])
                 else:
-                    info = _("\nI train fleets in {}\n").format(city["cityName"])
+                    info = _("\nI train fleets in {}\n").format(city["name"])
                 setInfoSignal(session, info)
                 try:
                     tranings_copy = []
@@ -569,21 +569,12 @@ def trainArmy(session, event, stdin_fd, predetermined_input):
 
                     thread = threading.Thread(target=planTrainings, args=(session, city, tranings_copy, trainTroops))
                     thread.start()
-                    sendToBot(session, "PAssou 1x"+ str(countRepeat))
-                    # planTrainings(session, city, tranings, trainTroops)
                 except Exception as e:
                     msg = _("Error in:\n{}\nCause:\n{}").format(
                         info, traceback.format_exc()
                     )
                     sendToBot(session, msg)
                 countRepeat = countRepeat -1
-                # finally:
-                #     session.logout()
-        if trainTroops:
-            print(_("\nThe selected troops will be trained."))
-        else:
-            print(_("\nThe selected fleet will be trained."))
-        enter()
     except KeyboardInterrupt:
         event.set()
         return
@@ -594,7 +585,7 @@ def trainArmy(session, event, stdin_fd, predetermined_input):
 
 def filterCitiesByResource(cities, resource_id, cityTrainings):
     for cityId, cityData in cities.items():
-        if cityData["tradegood"] == resource_id:
+        if cityData["tradegood"] == int(resource_id):
             cityTrainings.append(cityData["id"])
     return cityTrainings
 
