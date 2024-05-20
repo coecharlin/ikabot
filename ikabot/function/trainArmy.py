@@ -112,6 +112,7 @@ def getBuildingInfoTownHall(data):
     return results
 
 def waitForInhabitants(session, city, populationNeed):
+    html = session.get(city_url + city["id"])
     data = getBuildingTownHall(session, city)
     townHallInfo = getBuildingInfoTownHall(data)
     maxInhabitants = townHallInfo.get("js_TownHallMaxInhabitants")
@@ -121,11 +122,17 @@ def waitForInhabitants(session, city, populationNeed):
     maxIdlePopulation = maxInhabitants - workingPopulation 
     currentIdlePopulation = maxIdlePopulation - occupiedSpace
     populationToGrow = maxIdlePopulation - currentIdlePopulation 
-    
+
+    freeCitizens = city["freeCitizens"]
+
     if populationToGrow != 0 and growthValue and growthValue > 1:
         timeToWait = populationNeed / growthValue
         waitTimeSeconds = timeToWait * 3600
-        wait(waitTimeSeconds + 10)
+        wait(waitTimeSeconds)
+
+        return True
+    else:
+        return False
 
 def train(session, city, trainings, trainTroops):
     """
@@ -187,10 +194,9 @@ def planTrainings(session, city, trainings, trainTroops):
 
         # total number of units to create
         total = sum(unit["cantidad"] for training in trainings for unit in training)
-        countTotal = sum(unit["cantidad"] for training in trainings for unit in training)
 
-        # if total == 0:
-        #     return
+        if total == 0:
+            return
 
         for training in trainings:
             waitForTraining(session, city, trainTroops)
@@ -204,49 +210,56 @@ def planTrainings(session, city, trainings, trainTroops):
             # for each unit type in training
             for unit in training:
 
-                # calculate how many units can actually be trained based on the resources available
                 unit["train"] = unit["cantidad"]
+                if unit["cantidad"] != 0:
+                    # calculate how many units can actually be trained based on the resources available
 
-                for i in range(len(materials_names_english)):
-                    material_name = materials_names_english[i].lower()
-                    if material_name in unit["costs"]:
-                        limiting = resourcesAvailable[i] // unit["costs"][material_name]
-                        unit["train"] = min(unit["train"], limiting)
+                    for i in range(len(materials_names_english)):
+                        material_name = materials_names_english[i].lower()
+                        if material_name in unit["costs"]:
+                            limiting = resourcesAvailable[i] // unit["costs"][material_name]
+                            unit["train"] = min(unit["train"], limiting)
 
-                if "citizens" in unit["costs"]:
-                    limiting = (
-                        resourcesAvailable[len(materials_names_english)]
-                        // unit["costs"]["citizens"]
-                    )
-                    unit["train"] = min(unit["train"], limiting)
+                    # if "citizens" in unit["costs"]:
+                    #     limiting = (
+                    #         resourcesAvailable[len(materials_names_english)]
+                    #         // unit["costs"]["citizens"]
+                    #     )
+                    #     unit["train"] = min(unit["train"], limiting)
 
-                # calculate the resources that will be left
-                for i in range(len(materials_names_english)):
-                    material_name = materials_names_english[i].lower()
-                    if material_name in unit["costs"]:
-                        resourcesAvailable[i] -= (
-                            unit["costs"][material_name] * unit["train"])
+                    # calculate the resources that will be left
+                    for i in range(len(materials_names_english)):
+                        material_name = materials_names_english[i].lower()
+                        if material_name in unit["costs"]:
+                            resourcesAvailable[i] -= (
+                                unit["costs"][material_name] * unit["train"])
 
-                if "citizens" in unit["costs"]:
-                    resourcesAvailable[len(materials_names_english)] -= (
-                        unit["costs"]["citizens"] * unit["train"])
+                    # if "citizens" in unit["costs"]:
+                    #     resourcesAvailable[len(materials_names_english)] -= (
+                    #         unit["costs"]["citizens"] * unit["train"])
 
-                unit["cantidad"] -= unit["train"]
+                    # unit["cantidad"] -= unit["train"]
 
             # amount of units that will be trained
-            total = sum([unit["train"] for unit in training])
-            if total != countTotal:
-                populationNeed = countTotal - total
-                waitForInhabitants(session, city, populationNeed)
-                total = countTotal
-            # if total == 0:
-            #     msg = _(
-            #         "It was not possible to finish the training due to lack of resources."
-            #     )
-            #     sendToBot(session, msg)
-            #     return
-
-            train(session, city, training, trainTroops)
+            # total = sum([unit["train"] for unit in training])
+            if resourcesAvailable[5] <= total:
+                populationNeed = total
+                check = waitForInhabitants(session, city, populationNeed)
+                if check:
+                    html = session.get(city_url + city["id"])
+                    city = getCity(html)
+                    city["pos"] = buildingPos
+                    if city["freeCitizens"] >= total:
+                        train(session, city, training, trainTroops)
+                    else:
+                        waitForInhabitants(session, city, populationNeed)
+                else:
+                    city = city["name"]
+                    msg = _("It was not possible to finish the training in the city: " + city)
+                    sendToBot(session, msg)
+                    return
+            else:
+                train(session, city, training, trainTroops)
 
 
 def generateArmyData(units_info):
